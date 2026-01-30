@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>TitanChart Pro</title>
+    <style>
+        :root { --bg: #0B0E14; --card: #161B22; --accent: #00E676; --text: #ffffff; }
+        body { 
+            background-color: var(--bg); color: var(--text); 
+            font-family: monospace; margin: 0; padding: 20px; 
+            display: flex; flex-direction: column; gap: 15px; 
+        }
+        
+        /* Card Style */
+        .card { 
+            background: var(--card); border: 1px solid #30363d; 
+            border-radius: 12px; padding: 15px; 
+        }
+        h2 { margin-top: 0; color: #8b949e; font-size: 14px; text-transform: uppercase; }
+
+        /* Chart Animation */
+        .chart { height: 100px; display: flex; align-items: flex-end; gap: 4px; }
+        .bar { flex: 1; background: var(--accent); opacity: 0.6; transition: height 0.3s; }
+
+        /* Buttons */
+        button { 
+            width: 100%; padding: 15px; margin-top: 5px;
+            background: #21262d; border: 1px solid #30363d; 
+            color: white; border-radius: 8px; font-weight: bold; font-size: 14px;
+        }
+        button:active { background: #30363d; transform: scale(0.98); }
+        .btn-green { background: var(--accent); color: black; border: none; }
+        .btn-red { background: rgba(255, 82, 82, 0.2); color: #FF5252; border: 1px solid #FF5252; }
+
+        /* Inputs */
+        input { 
+            width: 100%; background: #0d1117; border: 1px solid #30363d; 
+            color: white; padding: 12px; box-sizing: border-box; border-radius: 6px; 
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Chart Section -->
+    <div class="card">
+        <h2>Live Market</h2>
+        <div class="chart" id="chartBox"></div>
+    </div>
+
+    <!-- Foreground Service -->
+    <div class="card">
+        <h2>Background Task</h2>
+        <h1 style="text-align: center; margin: 10px 0;" id="timerDisplay">00:00</h1>
+        <button class="btn-green" onclick="startSvc()">START SERVICE</button>
+        <button class="btn-red" onclick="stopSvc()">STOP SERVICE</button>
+    </div>
+
+    <!-- Features -->
+    <div class="card">
+        <h2>System Tools</h2>
+        <button onclick="native('vibrate')">📳 Vibrate Phone</button>
+        <button onclick="native('alarm', {sec: 5, msg: 'Check Market!'})">⏰ Set Alarm (5s)</button>
+    </div>
+
+    <!-- Storage -->
+    <div class="card">
+        <h2>Secure Storage</h2>
+        <input type="text" id="note" placeholder="Enter secret data...">
+        <div style="display: flex; gap: 10px;">
+            <button class="btn-green" onclick="saveData()">SAVE</button>
+            <button onclick="loadData()">LOAD</button>
+        </div>
+    </div>
+
+    <script>
+        // --- BRIDGE TO FLUTTER ---
+        function native(type, data = {}) {
+            if (window.TitanBridge) {
+                window.TitanBridge.postMessage(JSON.stringify({ type: type, ...data }));
+            }
+        }
+
+        // --- LOGIC ---
+        // 1. Chart Animation
+        const chart = document.getElementById('chartBox');
+        for(let i=0; i<20; i++) {
+            let d = document.createElement('div');
+            d.className = 'bar'; d.style.height = '50%';
+            chart.appendChild(d);
+        }
+        setInterval(() => {
+            document.querySelectorAll('.bar').forEach(b => 
+                b.style.height = Math.random() * 80 + 10 + '%');
+        }, 800);
+
+        // 2. Timer Service
+        let sec = 0; let interval = null;
+        function startSvc() {
+            if(interval) return;
+            native('vibrate');
+            native('service_start', { title: 'Titan Active', body: 'Monitoring...' });
+            interval = setInterval(() => {
+                sec++;
+                let t = new Date(sec * 1000).toISOString().substr(14, 5);
+                document.getElementById('timerDisplay').innerText = t;
+                native('service_update', { body: 'Timer: ' + t });
+            }, 1000);
+        }
+
+        function stopSvc() {
+            clearInterval(interval); interval = null; sec = 0;
+            document.getElementById('timerDisplay').innerText = "00:00";
+            native('service_stop');
+            native('vibrate');
+        }
+
+        // 3. Storage
+        function saveData() {
+            native('storage_save', { key: 'user_note', val: document.getElementById('note').value });
+            native('vibrate');
+        }
+        function loadData() {
+            native('storage_load', { key: 'user_note' });
+        }
+
+        // 4. Receive Data from Flutter
+        window.fromNative = function(type, data) {
+            if(type === 'storage_result') {
+                document.getElementById('note').value = data.val;
+                alert('Data Loaded!');
+            }
+        }
+        
+        // Auto Load
+        setTimeout(loadData, 500);
+    </script>
+</body>
+</html>
