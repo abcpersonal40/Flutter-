@@ -1,4 +1,4 @@
-name: TitanChart Pro Build
+name: TitanChart Pro Flutter Final Build
 
 on:
   push:
@@ -22,28 +22,44 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      - name: Create Project & Link WWW
+      - name: Create Project & Fix Config
         run: |
-          # 1. Create Flutter Project in current dir (keeping your www folder)
+          rm -rf ./* .target
           flutter create --org com.titanchart --project-name titanchart_pro .
           
-          # 2. Add Dependencies
-          flutter pub add webview_flutter:^4.7.0
-          flutter pub add flutter_foreground_task:^6.5.0
-          flutter pub add flutter_local_notifications:^17.0.0
-          flutter pub add shared_preferences:^2.2.2
-          flutter pub add permission_handler:^11.3.0
-          flutter pub add vibration:^1.9.0
+          # FIX: Overwriting pubspec.yaml manually to prevent "Duplicate mapping key" error
+          cat > pubspec.yaml <<EOF
+          name: titanchart_pro
+          description: A new Flutter project.
+          publish_to: 'none'
+          version: 1.0.0+1
+          environment:
+            sdk: '>=3.2.0 <4.0.0'
 
-          # 3. CRITICAL: Register your 'www' folder as an asset in pubspec.yaml
-          cat >> pubspec.yaml <<EOF
-          
+          dependencies:
+            flutter:
+              sdk: flutter
+            webview_flutter: ^4.7.0
+            flutter_foreground_task: ^6.5.0
+            flutter_local_notifications: ^17.0.0
+            shared_preferences: ^2.2.2
+            intl: ^0.19.0
+            permission_handler: ^11.3.0
+            cupertino_icons: ^1.0.6
+
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^3.0.0
+
           flutter:
-            assets:
-              - www/
+            uses-material-design: true
           EOF
+          
+          # Install the dependencies defined above
+          flutter pub get
 
-      - name: Configure Android Permissions
+      - name: Setup Android Manifest
         run: |
           cat > android/app/src/main/AndroidManifest.xml <<EOF
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.titanchart.titanchart_pro">
@@ -61,6 +77,11 @@ jobs:
                   android:label="TitanChart Pro"
                   android:name="\${applicationName}"
                   android:icon="@mipmap/ic_launcher">
+                  
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -74,47 +95,214 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-                  <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="dataSync" android:exported="false" />
+                  
+                  <service 
+                      android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+                      android:foregroundServiceType="dataSync"
+                      android:exported="false" />
               </application>
           </manifest>
           EOF
 
-      - name: Inject Flutter Bridge Code
+      - name: Setup Flutter Main Code
         run: |
           cat > lib/main.dart <<EOF
           import 'dart:async';
-          import 'dart:convert';
           import 'dart:isolate';
+          import 'dart:convert';
           import 'package:flutter/material.dart';
-          import 'package:webview_flutter/webview_flutter.dart';
           import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
           import 'package:flutter_local_notifications/flutter_local_notifications.dart';
           import 'package:shared_preferences/shared_preferences.dart';
           import 'package:permission_handler/permission_handler.dart';
-          import 'package:vibration/vibration.dart';
 
           final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
-            await _initNotifs();
+            await _initNotifications();
             runApp(const TitanApp());
           }
 
-          Future<void> _initNotifs() async {
-            const AndroidInitializationSettings initSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
-            const InitializationSettings initSettings = InitializationSettings(android: initSettingsAndroid);
-            await flutterLocalNotificationsPlugin.initialize(initSettings);
+          Future<void> _initNotifications() async {
+            const AndroidInitializationSettings initializationSettingsAndroid =
+                AndroidInitializationSettings('@mipmap/ic_launcher');
+            const InitializationSettings initializationSettings =
+                InitializationSettings(android: initializationSettingsAndroid);
+            await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+            
+            const AndroidNotificationChannel channel = AndroidNotificationChannel(
+              'titan_alarm_channel', 
+              'Titan Alarms',
+              description: 'This channel is used for important alarms.',
+              importance: Importance.max,
+              playSound: true,
+              enableVibration: true,
+            );
+            
+            await flutterLocalNotificationsPlugin
+                .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+                ?.createNotificationChannel(channel);
           }
 
           @pragma('vm:entry-point')
-          void startCallback() { FlutterForegroundTask.setTaskHandler(MyTaskHandler()); }
+          void startCallback() {
+            FlutterForegroundTask.setTaskHandler(MyTaskHandler());
+          }
 
           class MyTaskHandler extends TaskHandler {
-            @override Future<void> onStart(DateTime t, SendPort? s) async {}
-            @override Future<void> onEvent(DateTime t, SendPort? s) async {}
-            @override Future<void> onDestroy(DateTime t, SendPort? s) async {}
-            @override void onNotificationPressed() { FlutterForegroundTask.launchApp(); }
+            Timer? _sysTimer;
+
+            @override
+            Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
+              final prefs = await SharedPreferences.getInstance();
+              
+              _sysTimer = Timer.periodic(const Duration(milliseconds: 1000), (timer) async {
+                String? actionJson = prefs.getString('action_queue');
+                
+                String? timerJson = prefs.getString('timers');
+                List<dynamic> timers = timerJson != null ? jsonDecode(timerJson) : [];
+                
+                bool swRunning = prefs.getBool('sw_running') ?? false;
+                int swElapsed = prefs.getInt('sw_elapsed') ?? 0;
+                
+                String? alarmJson = prefs.getString('alarms');
+                List<dynamic> alarms = alarmJson != null ? jsonDecode(alarmJson) : [];
+                
+                bool stateChanged = false;
+
+                if (actionJson != null) {
+                   Map<String, dynamic> action = jsonDecode(actionJson);
+                   String type = action['type'];
+                   
+                   if (type == 'ADD_TIMER') {
+                     timers.add(action['data']);
+                     stateChanged = true;
+                   } 
+                   else if (type == 'TOGGLE_TIMER') {
+                     String id = action['id'];
+                     for (var t in timers) {
+                       if (t['id'] == id) t['running'] = !t['running'];
+                     }
+                     stateChanged = true;
+                   }
+                   else if (type == 'DELETE_TIMER') {
+                     timers.removeWhere((t) => t['id'] == action['id']);
+                     stateChanged = true;
+                   }
+                   else if (type == 'TOGGLE_SW') {
+                     swRunning = !swRunning;
+                     await prefs.setBool('sw_running', swRunning);
+                     stateChanged = true;
+                   }
+                   else if (type == 'RESET_SW') {
+                     swRunning = false;
+                     swElapsed = 0;
+                     await prefs.setBool('sw_running', false);
+                     await prefs.setInt('sw_elapsed', 0);
+                     stateChanged = true;
+                   }
+                   else if (type == 'ADD_ALARM') {
+                     alarms.add(action['data']);
+                     stateChanged = true;
+                   }
+                   else if (type == 'DELETE_ALARM') {
+                     alarms.removeAt(action['index']);
+                     stateChanged = true;
+                   }
+                   else if (type == 'STOP_ALL') {
+                     for (var t in timers) t['running'] = false;
+                     swRunning = false;
+                     await prefs.setBool('sw_running', false);
+                     stateChanged = true;
+                   }
+                   await prefs.remove('action_queue');
+                }
+
+                List<String> statusParts = [];
+
+                for (var t in timers) {
+                  if (t['running'] == true && t['remaining'] > 0) {
+                    t['remaining']--;
+                    stateChanged = true;
+                    if (t['remaining'] <= 0) {
+                      t['running'] = false;
+                      _showNotif("Timer Finished", "\${t['label']} is done!");
+                    }
+                  }
+                  if (t['running']) statusParts.add("\${t['label']}: \${t['remaining']}s");
+                }
+
+                if (swRunning) {
+                  swElapsed++;
+                  await prefs.setInt('sw_elapsed', swElapsed);
+                  stateChanged = true;
+                  statusParts.add("SW: \${swElapsed}s");
+                }
+
+                DateTime now = DateTime.now();
+                for (var a in alarms) {
+                  if (a['enabled'] == true) {
+                    DateTime target = DateTime.parse(a['time']);
+                    if (now.isAfter(target) && now.difference(target).inSeconds < 5) {
+                       _showNotif("ALARM: \${a['message']}", "It's time!", isAlarm: true);
+                       a['enabled'] = false; 
+                       stateChanged = true;
+                    }
+                  }
+                }
+
+                if (stateChanged) {
+                  await prefs.setString('timers', jsonEncode(timers));
+                  await prefs.setString('alarms', jsonEncode(alarms));
+                  sendPort?.send("UPDATE"); 
+                }
+
+                String displayText = statusParts.join(" | ");
+                if (displayText.isEmpty) displayText = "Titan Tools Ready";
+                
+                FlutterForegroundTask.updateService(
+                  notificationTitle: 'TitanChart Pro',
+                  notificationText: displayText,
+                );
+              });
+            }
+
+            @override
+            void onRepeatEvent(DateTime timestamp, SendPort? sendPort) {}
+
+            @override
+            Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {
+              _sysTimer?.cancel();
+            }
+
+            @override
+            void onNotificationPressed() {
+              FlutterForegroundTask.launchApp();
+            }
+            
+            @override
+            void onButtonPressed(String id) async {
+              if (id == 'stopAll') {
+                 final prefs = await SharedPreferences.getInstance();
+                 await prefs.setString('action_queue', jsonEncode({'type': 'STOP_ALL'}));
+              }
+            }
+
+            Future<void> _showNotif(String title, String body, {bool isAlarm = false}) async {
+              var android = AndroidNotificationDetails(
+                  isAlarm ? 'titan_alarm_channel' : 'titan_alert_channel', 
+                  isAlarm ? 'Titan Alarms' : 'Titan Alerts',
+                  importance: Importance.max, 
+                  priority: Priority.high,
+                  playSound: true,
+                  enableVibration: true,
+                  fullScreenIntent: isAlarm
+              );
+              await flutterLocalNotificationsPlugin.show(
+                  DateTime.now().millisecond, title, body, NotificationDetails(android: android));
+            }
           }
 
           class TitanApp extends StatefulWidget {
@@ -122,89 +310,283 @@ jobs:
             @override State<TitanApp> createState() => _TitanAppState();
           }
 
-          class _TitanAppState extends State<TitanApp> {
-            late final WebViewController _ctrl;
+          class _TitanAppState extends State<TitanApp> with SingleTickerProviderStateMixin {
+            late TabController _tabController;
+            Timer? _uiPoller;
+            List<dynamic> _timers = [];
+            bool _swRunning = false;
+            int _swElapsed = 0;
+            List<dynamic> _alarms = [];
 
             @override
             void initState() {
               super.initState();
-              _reqPerms();
-              _initService();
-              
-              // Load the user's index.html from www folder
-              _ctrl = WebViewController()
-                ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                ..setBackgroundColor(const Color(0xFF0B0E14))
-                ..addJavaScriptChannel('TitanBridge', onMessageReceived: (m) => _handleMsg(m.message))
-                ..loadFlutterAsset('www/index.html');
+              _requestPermissions();
+              _tabController = TabController(length: 4, vsync: this);
+              _initForeground();
+              _startService();
+              _uiPoller = Timer.periodic(const Duration(milliseconds: 500), (t) => _syncState());
+            }
+            
+            Future<void> _requestPermissions() async {
+              await Permission.notification.request();
+              await Permission.scheduleExactAlarm.request();
             }
 
-            Future<void> _reqPerms() async {
-              await [Permission.notification, Permission.scheduleExactAlarm, Permission.storage].request();
+            Future<void> _syncState() async {
+               final prefs = await SharedPreferences.getInstance();
+               String? tJson = prefs.getString('timers');
+               String? aJson = prefs.getString('alarms');
+               
+               if(mounted) {
+                 setState(() {
+                   _timers = tJson != null ? jsonDecode(tJson) : [];
+                   _swRunning = prefs.getBool('sw_running') ?? false;
+                   _swElapsed = prefs.getInt('sw_elapsed') ?? 0;
+                   _alarms = aJson != null ? jsonDecode(aJson) : [];
+                 });
+               }
+            }
+            
+            Future<void> _sendCommand(Map<String, dynamic> cmd) async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('action_queue', jsonEncode(cmd));
+              Future.delayed(const Duration(milliseconds: 100), _syncState);
             }
 
-            void _initService() {
+            void _initForeground() {
               FlutterForegroundTask.init(
                 androidNotificationOptions: AndroidNotificationOptions(
-                  channelId: 'titan_svc', channelName: 'Titan Service',
+                  channelId: 'titan_service',
+                  channelName: 'Titan Service',
                   channelImportance: NotificationChannelImportance.LOW,
                   priority: NotificationPriority.LOW,
                   iconData: const NotificationIconData(resType: ResourceType.mipmap, resPrefix: ResourcePrefix.ic, name: 'launcher'),
+                  buttons: [const NotificationButton(id: 'stopAll', text: 'STOP ALL')],
                 ),
                 iosNotificationOptions: const IOSNotificationOptions(),
-                foregroundTaskOptions: const ForegroundTaskOptions(interval: 1000, autoRunOnBoot: false, allowWakeLock: true),
+                foregroundTaskOptions: const ForegroundTaskOptions(
+                  interval: 1000,
+                  isOnceEvent: false,
+                  autoRunOnBoot: true,
+                  allowWakeLock: true,
+                ),
               );
             }
 
-            Future<void> _handleMsg(String jsonStr) async {
-              try {
-                final Map<String, dynamic> data = jsonDecode(jsonStr);
-                final String type = data['type'];
-
-                if (type == 'vibrate') {
-                  if (await Vibration.hasVibrator() ?? false) Vibration.vibrate(duration: 50);
-                }
-                else if (type == 'service_start') {
-                  if (!await FlutterForegroundTask.isRunningService) {
-                    FlutterForegroundTask.startService(
-                      notificationTitle: data['title'], notificationText: data['body'], callback: startCallback
-                    );
-                  }
-                }
-                else if (type == 'service_stop') {
-                  FlutterForegroundTask.stopService();
-                }
-                else if (type == 'service_update') {
-                  FlutterForegroundTask.updateService(notificationTitle: 'TitanChart Pro', notificationText: data['body']);
-                }
-                else if (type == 'alarm') {
-                  int sec = data['sec'];
-                  await flutterLocalNotificationsPlugin.show(
-                    DateTime.now().millisecond, 'Titan Alarm', data['msg'],
-                    const NotificationDetails(android: AndroidNotificationDetails(
-                      'titan_alarm', 'Alarm', importance: Importance.max, priority: Priority.high, playSound: true
-                    ))
-                  );
-                }
-                else if (type == 'storage_save') {
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setString(data['key'], data['val']);
-                }
-                else if (type == 'storage_load') {
-                  final prefs = await SharedPreferences.getInstance();
-                  String? val = prefs.getString(data['key']);
-                  _ctrl.runJavaScript("window.fromNative('storage_result', { key: '\${data['key']}', val: '\${val ?? ''}' });");
-                }
-              } catch(e) { print(e); }
+            Future<void> _startService() async {
+              if (!await FlutterForegroundTask.isRunningService) {
+                await FlutterForegroundTask.startService(
+                  notificationTitle: 'TitanChart Pro',
+                  notificationText: 'Tools Ready',
+                  callback: startCallback,
+                );
+              }
             }
 
             @override
             Widget build(BuildContext context) {
               return MaterialApp(
                 debugShowCheckedModeBanner: false,
-                home: WithForegroundTask(child: Scaffold(body: SafeArea(child: WebViewWidget(controller: _ctrl))))
+                theme: ThemeData.dark().copyWith(
+                  scaffoldBackgroundColor: const Color(0xFF0B0E14),
+                  appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF161B22)),
+                ),
+                home: WithForegroundTask(
+                  child: Scaffold(
+                    appBar: AppBar(
+                      title: const Text("TitanChart Pro"),
+                      bottom: TabBar(
+                        controller: _tabController,
+                        indicatorColor: Colors.green,
+                        tabs: const [
+                          Tab(icon: Icon(Icons.show_chart)),
+                          Tab(icon: Icon(Icons.timer)),
+                          Tab(icon: Icon(Icons.watch_later)),
+                          Tab(icon: Icon(Icons.alarm)),
+                        ],
+                      ),
+                    ),
+                    body: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        const ChartView(),
+                        TimerView(timers: _timers, onCommand: _sendCommand),
+                        StopwatchView(running: _swRunning, elapsed: _swElapsed, onCommand: _sendCommand),
+                        AlarmView(alarms: _alarms, onCommand: _sendCommand),
+                      ],
+                    ),
+                  ),
+                ),
               );
             }
+          }
+
+          class ChartView extends StatefulWidget {
+            const ChartView({super.key});
+            @override State<ChartView> createState() => _CState();
+          }
+          class _CState extends State<ChartView> {
+            late final WebViewController c;
+            @override void initState() {
+               super.initState();
+               c = WebViewController()..setJavaScriptMode(JavaScriptMode.unrestricted)..loadHtmlString('<html><body style="background:#0b0e14;color:white;display:flex;justify-content:center;align-items:center;"><h1>TitanChart</h1></body></html>');
+            }
+            @override Widget build(BuildContext context) => WebViewWidget(controller: c);
+          }
+
+          class TimerView extends StatelessWidget {
+            final List<dynamic> timers;
+            final Function(Map<String, dynamic>) onCommand;
+            const TimerView({super.key, required this.timers, required this.onCommand});
+            
+            @override Widget build(BuildContext context) {
+              return Scaffold(
+                floatingActionButton: FloatingActionButton(
+                  backgroundColor: Colors.green, child: const Icon(Icons.add),
+                  onPressed: () => _add(context),
+                ),
+                body: ListView.builder(
+                  itemCount: timers.length,
+                  itemBuilder: (ctx, i) {
+                    var t = timers[i];
+                    bool isRun = t['running'];
+                    return Card(
+                      color: const Color(0xFF161B22),
+                      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(t['label'], style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                                const SizedBox(height: 5),
+                                Text(_fmt(t['remaining']), style: const TextStyle(color: Colors.white, fontSize: 32, fontFamily: 'monospace')),
+                              ],
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: Icon(isRun ? Icons.pause_circle : Icons.play_circle, color: isRun ? Colors.orange : Colors.green, size: 40),
+                              onPressed: () => onCommand({'type': 'TOGGLE_TIMER', 'id': t['id']}),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => onCommand({'type': 'DELETE_TIMER', 'id': t['id']}),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+            }
+            void _add(BuildContext context) {
+               TextEditingController lbl = TextEditingController(text: "Timer");
+               TextEditingController sec = TextEditingController(text: "60");
+               showDialog(context: context, builder: (c) => AlertDialog(
+                 backgroundColor: const Color(0xFF161B22),
+                 title: const Text("New Timer", style: TextStyle(color: Colors.white)),
+                 content: Column(mainAxisSize: MainAxisSize.min, children: [
+                   TextField(controller: lbl, decoration: const InputDecoration(labelText: "Label"), style: const TextStyle(color: Colors.white)),
+                   TextField(controller: sec, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Seconds"), style: const TextStyle(color: Colors.white)),
+                 ]),
+                 actions: [TextButton(onPressed: () {
+                   onCommand({
+                     'type': 'ADD_TIMER',
+                     'data': {
+                       'id': DateTime.now().toString(), 
+                       'label': lbl.text, 
+                       'remaining': int.tryParse(sec.text) ?? 60,
+                       'running': true
+                     }
+                   });
+                   Navigator.pop(c);
+                 }, child: const Text("START"))],
+               ));
+            }
+            String _fmt(int s) {
+              int m = s ~/ 60; int sc = s % 60;
+              return "\${m.toString().padLeft(2,'0')}:\${sc.toString().padLeft(2,'0')}";
+            }
+          }
+
+          class StopwatchView extends StatelessWidget {
+            final bool running;
+            final int elapsed;
+            final Function(Map<String, dynamic>) onCommand;
+            const StopwatchView({super.key, required this.running, required this.elapsed, required this.onCommand});
+            
+            @override Widget build(BuildContext context) {
+              return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                 Text(_fmt(elapsed), style: const TextStyle(fontSize: 70, color: Colors.blue, fontFamily: 'monospace')),
+                 const SizedBox(height: 30),
+                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                   ElevatedButton.icon(
+                     icon: Icon(running ? Icons.pause : Icons.play_arrow),
+                     label: Text(running ? "PAUSE" : "START"),
+                     style: ElevatedButton.styleFrom(backgroundColor: running ? Colors.orange : Colors.green, padding: const EdgeInsets.all(20)),
+                     onPressed: () => onCommand({'type': 'TOGGLE_SW'}),
+                   ),
+                   const SizedBox(width: 20),
+                   ElevatedButton.icon(
+                     icon: const Icon(Icons.refresh),
+                     label: const Text("RESET"),
+                     style: ElevatedButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.all(20)),
+                     onPressed: () => onCommand({'type': 'RESET_SW'}),
+                   )
+                 ])
+              ]));
+            }
+            String _fmt(int s) {
+              int h = s ~/ 3600; int m = (s % 3600) ~/ 60; int sc = s % 60;
+              return "\${h.toString().padLeft(2,'0')}:\${m.toString().padLeft(2,'0')}:\${sc.toString().padLeft(2,'0')}";
+            }
+          }
+
+          class AlarmView extends StatelessWidget {
+             final List<dynamic> alarms;
+             final Function(Map<String, dynamic>) onCommand;
+             const AlarmView({super.key, required this.alarms, required this.onCommand});
+             
+             @override Widget build(BuildContext context) {
+               return Scaffold(
+                 floatingActionButton: FloatingActionButton(backgroundColor: Colors.green, child: const Icon(Icons.add), onPressed: () => _add(context)),
+                 body: ListView.builder(itemCount: alarms.length, itemBuilder: (c,i) {
+                   var a = alarms[i];
+                   return Card(color: const Color(0xFF161B22), margin: const EdgeInsets.all(10), child: ListTile(
+                     leading: Icon(Icons.alarm, color: a['enabled'] ? Colors.green : Colors.grey),
+                     title: Text(a['time'].toString().substring(11,16), style: const TextStyle(color: Colors.white, fontSize: 24)),
+                     subtitle: Text(a['message'], style: const TextStyle(color: Colors.grey)),
+                     trailing: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => onCommand({'type': 'DELETE_ALARM', 'index': i})),
+                   ));
+                 }),
+               );
+             }
+             void _add(BuildContext context) async {
+               TimeOfDay? t = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+               if(t!=null) {
+                 final now = DateTime.now();
+                 DateTime dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
+                 if(dt.isBefore(now)) dt = dt.add(const Duration(days: 1));
+                 
+                 TextEditingController msg = TextEditingController(text: "Alarm!");
+                 showDialog(context: context, builder: (c) => AlertDialog(
+                   backgroundColor: const Color(0xFF161B22),
+                   title: const Text("Set Alarm", style: TextStyle(color: Colors.white)),
+                   content: TextField(controller: msg, style: const TextStyle(color: Colors.white)),
+                   actions: [TextButton(onPressed: () {
+                     onCommand({
+                       'type': 'ADD_ALARM',
+                       'data': {'time': dt.toString(), 'message': msg.text, 'enabled': true}
+                     });
+                     Navigator.pop(c);
+                   }, child: const Text("SET"))],
+                 ));
+               }
+             }
           }
           EOF
 
@@ -213,7 +595,7 @@ jobs:
           # 1. Generate Keystore
           keytool -genkey -v -keystore android/app/release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias key -storepass titan123456 -keypass titan123456 -dname "CN=Titan, O=Dev, C=BD"
           
-          # 2. Configure Key
+          # 2. Create key.properties
           cat > android/key.properties <<EOF
           storePassword=titan123456
           keyPassword=titan123456
@@ -221,27 +603,60 @@ jobs:
           storeFile=release-key.jks
           EOF
           
-          # 3. Configure Gradle
+          # 3. Modify build.gradle
           cat > android/app/build.gradle <<EOF
-          plugins { id "com.android.application"; id "kotlin-android"; id "dev.flutter.flutter-gradle-plugin"; }
-          def kP = new Properties()
-          def kF = rootProject.file('key.properties')
-          if (kF.exists()) kP.load(new FileInputStream(kF))
+          plugins {
+              id "com.android.application"
+              id "kotlin-android"
+              id "dev.flutter.flutter-gradle-plugin"
+          }
+
+          def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
           android {
               namespace "com.titanchart.titanchart_pro"
               compileSdkVersion 34 
               ndkVersion flutter.ndkVersion
-              compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
               kotlinOptions { jvmTarget = '1.8' }
               sourceSets { main.java.srcDirs += 'src/main/kotlin' }
-              defaultConfig { applicationId "com.titanchart.titanchart_pro"; minSdkVersion 23; targetSdkVersion 34; versionCode 1; versionName "1.0"; }
-              signingConfigs { release { storeFile file('release-key.jks'); storePassword 'titan123456'; keyAlias 'key'; keyPassword 'titan123456'; } }
-              buildTypes { release { signingConfig signingConfigs.release; minifyEnabled false; } }
+
+              defaultConfig {
+                  applicationId "com.titanchart.titanchart_pro"
+                  minSdkVersion 23
+                  targetSdkVersion 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              signingConfigs {
+                  release {
+                      storeFile file('release-key.jks')
+                      storePassword 'titan123456'
+                      keyAlias 'key'
+                      keyPassword 'titan123456'
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                      minifyEnabled false
+                      shrinkResources false
+                  }
+              }
           }
           flutter { source '../..' }
           EOF
-
-          # 4. Fix Settings Gradle
+          
+          # Fix settings.gradle
           cat > android/settings.gradle <<EOF
           pluginManagement {
               def flutterSdkPath = {
@@ -267,5 +682,5 @@ jobs:
       - name: Upload Final APK
         uses: actions/upload-artifact@v4
         with:
-          name: TitanChart-Pro-APK
+          name: TitanChart-Pro-Final-APK
           path: build/app/outputs/flutter-apk/app-release.apk
