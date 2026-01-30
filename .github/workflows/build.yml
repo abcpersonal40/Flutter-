@@ -24,10 +24,10 @@ jobs:
 
       - name: Initialize Flutter Project
         run: |
-          # 1. Create Project
+          # 1. প্রজেক্ট তৈরি
           flutter create --org com.titanchart --project-name titanchart_pro .
           
-          # 2. Install Dependencies
+          # 2. প্লাগিন অ্যাড
           flutter pub add webview_flutter:^4.7.0
           flutter pub add flutter_foreground_task:^6.5.0
           flutter pub add flutter_local_notifications:^17.0.0
@@ -35,14 +35,11 @@ jobs:
           flutter pub add permission_handler:^11.3.0
           flutter pub add vibration:^1.9.0
 
-      # --- FIX 1: PUBSPEC YAML (Duplicate Key Solution) ---
       - name: Link WWW Assets
         run: |
-          # We use SED to insert the assets config inside the existing flutter section.
-          # This prevents the "Duplicate mapping key" error.
+          # pubspec.yaml এ ডুপ্লিকেট এড়াতে sed ব্যবহার করে assets যোগ করা
           sed -i 's/uses-material-design: true/uses-material-design: true\n  assets:\n    - www\//' pubspec.yaml
 
-      # --- FIX 2: ANDROID MANIFEST (Embedding V2 Solution) ---
       - name: Configure Android Manifest
         run: |
           cat > android/app/src/main/AndroidManifest.xml <<EOF
@@ -62,7 +59,6 @@ jobs:
                   android:name="\${applicationName}"
                   android:icon="@mipmap/ic_launcher">
                   
-                  <!-- CRITICAL FIX: This line solves the "deprecated Android v1 embedding" error -->
                   <meta-data
                       android:name="flutterEmbedding"
                       android:value="2" />
@@ -219,9 +215,10 @@ jobs:
 
       - name: Build and Sign APK
         run: |
-          # Key Setup
+          # কিস্টোর তৈরি
           keytool -genkey -v -keystore android/app/release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias key -storepass titan123456 -keypass titan123456 -dname "CN=Titan, O=Dev, C=BD"
           
+          # কী প্রোপার্টিজ
           cat > android/key.properties <<EOF
           storePassword=titan123456
           keyPassword=titan123456
@@ -229,7 +226,7 @@ jobs:
           storeFile=release-key.jks
           EOF
           
-          # Gradle Setup
+          # গ্রেডল কনফিগারেশন (shrinkResources এবং minifyEnabled ফিক্স করা হয়েছে)
           cat > android/app/build.gradle <<EOF
           plugins { id "com.android.application"; id "kotlin-android"; id "dev.flutter.flutter-gradle-plugin"; }
           def kP = new Properties()
@@ -244,7 +241,13 @@ jobs:
               sourceSets { main.java.srcDirs += 'src/main/kotlin' }
               defaultConfig { applicationId "com.titanchart.titanchart_pro"; minSdkVersion 23; targetSdkVersion 34; versionCode 1; versionName "1.0"; }
               signingConfigs { release { storeFile file('release-key.jks'); storePassword 'titan123456'; keyAlias 'key'; keyPassword 'titan123456'; } }
-              buildTypes { release { signingConfig signingConfigs.release; minifyEnabled false; } }
+              buildTypes { 
+                  release { 
+                      signingConfig signingConfigs.release; 
+                      minifyEnabled false; 
+                      shrinkResources false; 
+                  } 
+              }
           }
           flutter { source '../..' }
           EOF
