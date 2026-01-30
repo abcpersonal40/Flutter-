@@ -1,0 +1,271 @@
+name: TitanChart Pro Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+
+      - name: Create Project & Link WWW
+        run: |
+          # 1. Create Flutter Project in current dir (keeping your www folder)
+          flutter create --org com.titanchart --project-name titanchart_pro .
+          
+          # 2. Add Dependencies
+          flutter pub add webview_flutter:^4.7.0
+          flutter pub add flutter_foreground_task:^6.5.0
+          flutter pub add flutter_local_notifications:^17.0.0
+          flutter pub add shared_preferences:^2.2.2
+          flutter pub add permission_handler:^11.3.0
+          flutter pub add vibration:^1.9.0
+
+          # 3. CRITICAL: Register your 'www' folder as an asset in pubspec.yaml
+          cat >> pubspec.yaml <<EOF
+          
+          flutter:
+            assets:
+              - www/
+          EOF
+
+      - name: Configure Android Permissions
+        run: |
+          cat > android/app/src/main/AndroidManifest.xml <<EOF
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.titanchart.titanchart_pro">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+              <application
+                  android:label="TitanChart Pro"
+                  android:name="\${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="dataSync" android:exported="false" />
+              </application>
+          </manifest>
+          EOF
+
+      - name: Inject Flutter Bridge Code
+        run: |
+          cat > lib/main.dart <<EOF
+          import 'dart:async';
+          import 'dart:convert';
+          import 'dart:isolate';
+          import 'package:flutter/material.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+          import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+          import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+          import 'package:shared_preferences/shared_preferences.dart';
+          import 'package:permission_handler/permission_handler.dart';
+          import 'package:vibration/vibration.dart';
+
+          final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+          void main() async {
+            WidgetsFlutterBinding.ensureInitialized();
+            await _initNotifs();
+            runApp(const TitanApp());
+          }
+
+          Future<void> _initNotifs() async {
+            const AndroidInitializationSettings initSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+            const InitializationSettings initSettings = InitializationSettings(android: initSettingsAndroid);
+            await flutterLocalNotificationsPlugin.initialize(initSettings);
+          }
+
+          @pragma('vm:entry-point')
+          void startCallback() { FlutterForegroundTask.setTaskHandler(MyTaskHandler()); }
+
+          class MyTaskHandler extends TaskHandler {
+            @override Future<void> onStart(DateTime t, SendPort? s) async {}
+            @override Future<void> onEvent(DateTime t, SendPort? s) async {}
+            @override Future<void> onDestroy(DateTime t, SendPort? s) async {}
+            @override void onNotificationPressed() { FlutterForegroundTask.launchApp(); }
+          }
+
+          class TitanApp extends StatefulWidget {
+            const TitanApp({super.key});
+            @override State<TitanApp> createState() => _TitanAppState();
+          }
+
+          class _TitanAppState extends State<TitanApp> {
+            late final WebViewController _ctrl;
+
+            @override
+            void initState() {
+              super.initState();
+              _reqPerms();
+              _initService();
+              
+              // Load the user's index.html from www folder
+              _ctrl = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..setBackgroundColor(const Color(0xFF0B0E14))
+                ..addJavaScriptChannel('TitanBridge', onMessageReceived: (m) => _handleMsg(m.message))
+                ..loadFlutterAsset('www/index.html');
+            }
+
+            Future<void> _reqPerms() async {
+              await [Permission.notification, Permission.scheduleExactAlarm, Permission.storage].request();
+            }
+
+            void _initService() {
+              FlutterForegroundTask.init(
+                androidNotificationOptions: AndroidNotificationOptions(
+                  channelId: 'titan_svc', channelName: 'Titan Service',
+                  channelImportance: NotificationChannelImportance.LOW,
+                  priority: NotificationPriority.LOW,
+                  iconData: const NotificationIconData(resType: ResourceType.mipmap, resPrefix: ResourcePrefix.ic, name: 'launcher'),
+                ),
+                iosNotificationOptions: const IOSNotificationOptions(),
+                foregroundTaskOptions: const ForegroundTaskOptions(interval: 1000, autoRunOnBoot: false, allowWakeLock: true),
+              );
+            }
+
+            Future<void> _handleMsg(String jsonStr) async {
+              try {
+                final Map<String, dynamic> data = jsonDecode(jsonStr);
+                final String type = data['type'];
+
+                if (type == 'vibrate') {
+                  if (await Vibration.hasVibrator() ?? false) Vibration.vibrate(duration: 50);
+                }
+                else if (type == 'service_start') {
+                  if (!await FlutterForegroundTask.isRunningService) {
+                    FlutterForegroundTask.startService(
+                      notificationTitle: data['title'], notificationText: data['body'], callback: startCallback
+                    );
+                  }
+                }
+                else if (type == 'service_stop') {
+                  FlutterForegroundTask.stopService();
+                }
+                else if (type == 'service_update') {
+                  FlutterForegroundTask.updateService(notificationTitle: 'TitanChart Pro', notificationText: data['body']);
+                }
+                else if (type == 'alarm') {
+                  int sec = data['sec'];
+                  await flutterLocalNotificationsPlugin.show(
+                    DateTime.now().millisecond, 'Titan Alarm', data['msg'],
+                    const NotificationDetails(android: AndroidNotificationDetails(
+                      'titan_alarm', 'Alarm', importance: Importance.max, priority: Priority.high, playSound: true
+                    ))
+                  );
+                }
+                else if (type == 'storage_save') {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString(data['key'], data['val']);
+                }
+                else if (type == 'storage_load') {
+                  final prefs = await SharedPreferences.getInstance();
+                  String? val = prefs.getString(data['key']);
+                  _ctrl.runJavaScript("window.fromNative('storage_result', { key: '\${data['key']}', val: '\${val ?? ''}' });");
+                }
+              } catch(e) { print(e); }
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                debugShowCheckedModeBanner: false,
+                home: WithForegroundTask(child: Scaffold(body: SafeArea(child: WebViewWidget(controller: _ctrl))))
+              );
+            }
+          }
+          EOF
+
+      - name: Build and Sign APK
+        run: |
+          # 1. Generate Keystore
+          keytool -genkey -v -keystore android/app/release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias key -storepass titan123456 -keypass titan123456 -dname "CN=Titan, O=Dev, C=BD"
+          
+          # 2. Configure Key
+          cat > android/key.properties <<EOF
+          storePassword=titan123456
+          keyPassword=titan123456
+          keyAlias=key
+          storeFile=release-key.jks
+          EOF
+          
+          # 3. Configure Gradle
+          cat > android/app/build.gradle <<EOF
+          plugins { id "com.android.application"; id "kotlin-android"; id "dev.flutter.flutter-gradle-plugin"; }
+          def kP = new Properties()
+          def kF = rootProject.file('key.properties')
+          if (kF.exists()) kP.load(new FileInputStream(kF))
+          android {
+              namespace "com.titanchart.titanchart_pro"
+              compileSdkVersion 34 
+              ndkVersion flutter.ndkVersion
+              compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+              kotlinOptions { jvmTarget = '1.8' }
+              sourceSets { main.java.srcDirs += 'src/main/kotlin' }
+              defaultConfig { applicationId "com.titanchart.titanchart_pro"; minSdkVersion 23; targetSdkVersion 34; versionCode 1; versionName "1.0"; }
+              signingConfigs { release { storeFile file('release-key.jks'); storePassword 'titan123456'; keyAlias 'key'; keyPassword 'titan123456'; } }
+              buildTypes { release { signingConfig signingConfigs.release; minifyEnabled false; } }
+          }
+          flutter { source '../..' }
+          EOF
+
+          # 4. Fix Settings Gradle
+          cat > android/settings.gradle <<EOF
+          pluginManagement {
+              def flutterSdkPath = {
+                  def properties = new Properties()
+                  file("local.properties").withInputStream { properties.load(it) }
+                  def flutterSdkPath = properties.getProperty("flutter.sdk")
+                  assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
+                  return flutterSdkPath
+              }()
+              includeBuild("\$flutterSdkPath/packages/flutter_tools/gradle")
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          plugins {
+              id "dev.flutter.flutter-plugin-loader" version "1.0.0"
+              id "com.android.application" version "7.3.0" apply false
+              id "org.jetbrains.kotlin.android" version "1.7.10" apply false
+          }
+          include ":app"
+          EOF
+
+          flutter build apk --release
+
+      - name: Upload Final APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TitanChart-Pro-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
