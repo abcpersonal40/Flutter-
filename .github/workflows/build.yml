@@ -34,7 +34,8 @@ jobs:
           flutter pub add timezone:^0.9.4
 
       - name: Link Assets Correctly
-        run: sed -i 's/uses-material-design: true/uses-material-design: true\n  assets:\n    - www\//' pubspec.yaml
+        run: |
+          sed -i 's/uses-material-design: true/uses-material-design: true\n  assets:\n    - www\//' pubspec.yaml
 
       - name: Android Config (Alarm & Permissions)
         run: |
@@ -103,7 +104,6 @@ jobs:
             const AndroidInitializationSettings init = AndroidInitializationSettings('@mipmap/ic_launcher');
             await _localNotif.initialize(const InitializationSettings(android: init));
             
-            // Create Alarm Channel with Loud Sound
             const AndroidNotificationChannel channel = AndroidNotificationChannel(
               'titan_alarm_channel', 'Titan Alarms', 
               importance: Importance.max, playSound: true, enableVibration: true,
