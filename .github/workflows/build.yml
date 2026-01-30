@@ -1,4 +1,4 @@
-name: TitanChart Pro (Final Fix)
+name: TitanChart Pro Final Build
 
 on:
   push:
@@ -24,10 +24,10 @@ jobs:
 
       - name: Initialize Flutter Project
         run: |
-          # Create project in current dir (merges with your www folder)
+          # 1. Create Project
           flutter create --org com.titanchart --project-name titanchart_pro .
           
-          # Install Plugins
+          # 2. Install Dependencies
           flutter pub add webview_flutter:^4.7.0
           flutter pub add flutter_foreground_task:^6.5.0
           flutter pub add flutter_local_notifications:^17.0.0
@@ -35,13 +35,14 @@ jobs:
           flutter pub add permission_handler:^11.3.0
           flutter pub add vibration:^1.9.0
 
-      # --- FIX: INSERT ASSETS CORRECTLY ---
-      - name: Link Your WWW Design
+      # --- FIX 1: PUBSPEC YAML (Duplicate Key Solution) ---
+      - name: Link WWW Assets
         run: |
-          # Instead of appending a duplicate 'flutter:' key, 
-          # we inject the assets config into the existing block.
+          # We use SED to insert the assets config inside the existing flutter section.
+          # This prevents the "Duplicate mapping key" error.
           sed -i 's/uses-material-design: true/uses-material-design: true\n  assets:\n    - www\//' pubspec.yaml
 
+      # --- FIX 2: ANDROID MANIFEST (Embedding V2 Solution) ---
       - name: Configure Android Manifest
         run: |
           cat > android/app/src/main/AndroidManifest.xml <<EOF
@@ -60,6 +61,12 @@ jobs:
                   android:label="TitanChart Pro"
                   android:name="\${applicationName}"
                   android:icon="@mipmap/ic_launcher">
+                  
+                  <!-- CRITICAL FIX: This line solves the "deprecated Android v1 embedding" error -->
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -73,7 +80,11 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-                  <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="dataSync" android:exported="false" />
+                  
+                  <service 
+                      android:name="com.pravera.flutter_foreground_task.service.ForegroundService" 
+                      android:foregroundServiceType="dataSync" 
+                      android:exported="false" />
               </application>
           </manifest>
           EOF
@@ -132,7 +143,7 @@ jobs:
               
               _ctrl = WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                ..setBackgroundColor(const Color(0xFF0F172A)) // Match your glassmorphism BG
+                ..setBackgroundColor(const Color(0xFF0F172A))
                 ..addJavaScriptChannel('TitanBridge', onMessageReceived: (m) => _handleMsg(m.message))
                 ..loadFlutterAsset('www/index.html');
             }
@@ -208,6 +219,7 @@ jobs:
 
       - name: Build and Sign APK
         run: |
+          # Key Setup
           keytool -genkey -v -keystore android/app/release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias key -storepass titan123456 -keypass titan123456 -dname "CN=Titan, O=Dev, C=BD"
           
           cat > android/key.properties <<EOF
@@ -217,6 +229,7 @@ jobs:
           storeFile=release-key.jks
           EOF
           
+          # Gradle Setup
           cat > android/app/build.gradle <<EOF
           plugins { id "com.android.application"; id "kotlin-android"; id "dev.flutter.flutter-gradle-plugin"; }
           def kP = new Properties()
@@ -261,5 +274,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TitanChart-Pro-Fixed-APK
+          name: TitanChart-Pro-Final-APK
           path: build/app/outputs/flutter-apk/app-release.apk
