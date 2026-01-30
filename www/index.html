@@ -3,344 +3,140 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Titan Pro</title>
+    <title>Titan Pro Console</title>
     <style>
-        /* --- RESET & VARIABLES --- */
-        :root {
-            --bg-dark: #0f172a;
-            --glass: rgba(30, 41, 59, 0.7);
-            --glass-border: rgba(255, 255, 255, 0.1);
-            --primary: #10b981; /* Neon Green */
-            --danger: #ef4444;  /* Neon Red */
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-        }
+        :root { --bg: #0f172a; --card: rgba(30, 41, 59, 0.7); --accent: #10b981; --red: #f43f5e; --blue: #3b82f6; }
+        body { background: var(--bg); color: white; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; box-sizing: border-box; }
+        .card { background: var(--card); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; margin-bottom: 15px; }
+        h2 { font-size: 14px; text-transform: uppercase; color: #94a3b8; margin-top: 0; letter-spacing: 1px; }
+        .status { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; background: #1e293b; margin-bottom: 10px; border: 1px solid #334155; }
+        
+        input { width: 100%; padding: 12px; background: rgba(0,0,0,0.2); border: 1px solid #334155; color: white; border-radius: 8px; margin-bottom: 10px; box-sizing: border-box; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        button { border: none; padding: 14px; border-radius: 10px; color: white; font-weight: bold; font-size: 13px; cursor: pointer; transition: 0.2s; background: #334155; }
+        button:active { transform: scale(0.95); }
+        .btn-green { background: var(--accent); color: #000; }
+        .btn-red { background: var(--red); }
+        .btn-blue { background: var(--blue); }
 
-        body {
-            background-color: var(--bg-dark);
-            background-image: radial-gradient(circle at 0% 0%, #1e293b 0%, #0f172a 100%);
-            color: var(--text-main);
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            box-sizing: border-box;
-        }
-
-        /* --- HEADER --- */
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 5px;
-        }
-
-        .brand {
-            font-size: 24px;
-            font-weight: 800;
-            letter-spacing: 1px;
-            background: linear-gradient(90deg, #fff, #94a3b8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .status-dot {
-            width: 10px; height: 10px;
-            background: var(--danger);
-            border-radius: 50%;
-            box-shadow: 0 0 10px var(--danger);
-            transition: 0.3s;
-        }
-        .status-dot.active {
-            background: var(--primary);
-            box-shadow: 0 0 10px var(--primary);
-        }
-
-        /* --- CARDS (GLASSMORPHISM) --- */
-        .card {
-            background: var(--glass);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
-            border-radius: 16px;
-            padding: 20px;
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
-            transition: transform 0.2s;
-        }
-
-        .card-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 15px;
-            color: var(--text-muted);
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            font-weight: bold;
-        }
-
-        /* --- CHART VISUALIZATION --- */
-        .chart-box {
-            height: 120px;
-            display: flex;
-            align-items: flex-end;
-            justify-content: space-between;
-            gap: 6px;
-            padding-bottom: 5px;
-            border-bottom: 1px solid var(--glass-border);
-        }
-        .bar {
-            flex: 1;
-            background: linear-gradient(180deg, var(--primary) 0%, rgba(16, 185, 129, 0) 100%);
-            border-radius: 4px 4px 0 0;
-            opacity: 0.8;
-            transition: height 0.5s ease-in-out;
-            min-height: 5%;
-        }
-
-        /* --- TIMER --- */
-        .timer-wrap {
-            text-align: center;
-            margin: 10px 0 20px 0;
-        }
-        .timer-text {
-            font-family: 'Courier New', monospace;
-            font-size: 48px;
-            font-weight: bold;
-            color: white;
-            text-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
-        }
-        .timer-label {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-
-        /* --- BUTTONS --- */
-        .grid-2 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-        }
-
-        button {
-            border: none;
-            padding: 16px;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            color: white;
-        }
-
-        button:active { transform: scale(0.96); }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
-        }
-        .btn-danger {
-            background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
-            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
-        }
-        .btn-dark {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--glass-border);
-        }
-        .btn-dark:hover { background: rgba(255, 255, 255, 0.1); }
-
-        /* --- INPUTS --- */
-        .input-group {
-            position: relative;
-            margin-bottom: 15px;
-        }
-        input {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid var(--glass-border);
-            padding: 15px;
-            border-radius: 12px;
-            color: white;
-            font-size: 14px;
-            outline: none;
-            box-sizing: border-box;
-            transition: border-color 0.3s;
-        }
-        input:focus { border-color: var(--primary); }
-
-        /* --- FOOTER --- */
-        .footer-note {
-            text-align: center;
-            color: var(--text-muted);
-            font-size: 11px;
-            margin-top: auto;
-            opacity: 0.5;
-        }
+        #log { font-family: monospace; font-size: 11px; height: 80px; overflow-y: auto; background: black; padding: 10px; border-radius: 8px; color: #00ff00; }
     </style>
 </head>
 <body>
 
-    <header>
-        <div class="brand">TITAN<span style="color:var(--primary)">.PRO</span></div>
-        <div id="bridgeStatus" class="status-dot"></div>
-    </header>
-
-    <!-- 1. LIVE MARKET CHART -->
     <div class="card">
-        <div class="card-header">
-            <span>📊 Market Volatility</span>
-        </div>
-        <div class="chart-box" id="chartContainer">
-            <!-- Bars injected by JS -->
-        </div>
+        <h2>System Status</h2>
+        <div id="status" class="status">BRIDGE READY</div>
+        <div id="log">Logs: App Started...</div>
     </div>
 
-    <!-- 2. FOREGROUND TIMER -->
+    <!-- FOREGROUND SERVICE WITH DYNAMIC BUTTONS -->
     <div class="card">
-        <div class="card-header">
-            <span>⏱️ Background Service</span>
+        <h2>1. Dynamic Foreground Service</h2>
+        <div class="grid">
+            <button class="btn-green" onclick="startSvc()">START (3 BUTTONS)</button>
+            <button class="btn-red" onclick="stopSvc()">STOP SERVICE</button>
         </div>
-        <div class="timer-wrap">
-            <div class="timer-text" id="timer">00:00</div>
-            <div class="timer-label">ACTIVE RUNTIME</div>
-        </div>
-        <div class="grid-2">
-            <button class="btn-primary" onclick="app.startService()">
-                <span>▶ START</span>
-            </button>
-            <button class="btn-danger" onclick="app.stopService()">
-                <span>⏹ STOP</span>
-            </button>
-        </div>
+        <button style="width: 100%; margin-top:10px;" onclick="updateSvc()">UPDATE NOTIFICATION TEXT</button>
     </div>
 
-    <!-- 3. TOOLS & ACTIONS -->
+    <!-- ALARM WITH NATIVE SOUND -->
     <div class="card">
-        <div class="card-header">
-            <span>🛠️ Quick Actions</span>
-        </div>
-        <div class="grid-2">
-            <button class="btn-dark" onclick="app.vibrate()">
-                <span>📳 HAPTIC</span>
-            </button>
-            <button class="btn-dark" onclick="app.alarm()">
-                <span>⏰ ALARM (5s)</span>
-            </button>
-        </div>
+        <h2>2. Advanced Alarm (Full Sound)</h2>
+        <input type="number" id="alarmSec" value="5" placeholder="Seconds to wait">
+        <button class="btn-blue" style="width: 100%;" onclick="setAlarm()">SET LOUD ALARM</button>
     </div>
 
-    <!-- 4. SECURE STORAGE -->
+    <!-- STORAGE & HAPTIC -->
     <div class="card">
-        <div class="card-header">
-            <span>💾 Encrypted Vault</span>
+        <h2>3. Storage & Haptic</h2>
+        <input type="text" id="storeData" placeholder="Data to save natively">
+        <div class="grid">
+            <button onclick="saveNative()">SAVE DATA</button>
+            <button onclick="loadNative()">LOAD DATA</button>
         </div>
-        <div class="input-group">
-            <input type="text" id="storageInput" placeholder="Enter secure note here...">
-        </div>
-        <div class="grid-2">
-            <button class="btn-primary" onclick="app.save()">SAVE</button>
-            <button class="btn-dark" onclick="app.load()">LOAD</button>
-        </div>
+        <button style="width: 100%; margin-top:10px;" onclick="vibrate()">TEST VIBRATION</button>
     </div>
-
-    <div class="footer-note">TITAN BRIDGE SYSTEM v1.0 • SECURE CONNECTION</div>
 
     <script>
-        // --- LOGIC CLASS ---
+        // --- NATIVE BRIDGE ---
         const app = {
-            timerInterval: null,
-            seconds: 0,
-            
-            // Send to Flutter
             send: (type, data = {}) => {
                 if (window.TitanBridge) {
                     window.TitanBridge.postMessage(JSON.stringify({ type, ...data }));
-                    document.getElementById('bridgeStatus').classList.add('active');
-                } else {
-                    console.warn("Flutter Bridge not detected");
                 }
             },
-
-            // 1. Service Logic
-            startService: () => {
-                if (app.timerInterval) return;
-                app.vibrate();
-                app.send('service_start', { title: 'Titan Pro', body: 'Market Monitor Active' });
-                
-                app.timerInterval = setInterval(() => {
-                    app.seconds++;
-                    const fmt = new Date(app.seconds * 1000).toISOString().substr(14, 5);
-                    document.getElementById('timer').innerText = fmt;
-                    app.send('service_update', { body: 'Running: ' + fmt });
-                }, 1000);
-            },
-
-            stopService: () => {
-                clearInterval(app.timerInterval);
-                app.timerInterval = null;
-                app.seconds = 0;
-                document.getElementById('timer').innerText = "00:00";
-                app.send('service_stop');
-                app.vibrate();
-            },
-
-            // 2. Tools
-            vibrate: () => app.send('vibrate'),
-            
-            alarm: () => {
-                app.send('alarm', { sec: 5, msg: '⚠️ Market Alert Triggered!' });
-                alert("Alarm set for 5 seconds!");
-            },
-
-            // 3. Storage
-            save: () => {
-                const val = document.getElementById('storageInput').value;
-                app.send('storage_save', { key: 'user_note', val: val });
-                app.vibrate();
-            },
-            
-            load: () => app.send('storage_load', { key: 'user_note' }),
-
-            // 4. UI Effects
-            initChart: () => {
-                const container = document.getElementById('chartContainer');
-                // Create 15 bars
-                for(let i=0; i<15; i++) {
-                    let bar = document.createElement('div');
-                    bar.className = 'bar';
-                    bar.style.height = Math.floor(Math.random() * 80 + 10) + '%';
-                    container.appendChild(bar);
-                }
-                // Animate bars loop
-                setInterval(() => {
-                    document.querySelectorAll('.bar').forEach(b => {
-                        b.style.height = Math.floor(Math.random() * 90 + 5) + '%';
-                    });
-                }, 1000);
+            log: (msg) => {
+                const l = document.getElementById('log');
+                l.innerHTML += `<br>> ${msg}`;
+                l.scrollTop = l.scrollHeight;
             }
         };
 
-        // --- RECEIVE FROM FLUTTER ---
-        window.fromNative = (type, data) => {
+        // 1. Foreground Logic
+        function startSvc() {
+            app.send('foreground_start', {
+                title: 'Titan Dynamic System',
+                body: 'Market Monitoring Active',
+                buttons: [
+                    { id: 'btn_play', text: 'PLAY' },
+                    { id: 'btn_pause', text: 'PAUSE' },
+                    { id: 'btn_stop', text: 'STOP' }
+                ]
+            });
+            app.log("Foreground Service Started with 3 buttons");
+        }
+
+        function stopSvc() {
+            app.send('foreground_stop');
+            app.log("Service Stopped");
+        }
+
+        function updateSvc() {
+            app.send('foreground_update', {
+                title: 'BTC: $69,420',
+                body: 'Status: Trend High | ' + new Date().toLocaleTimeString()
+            });
+        }
+
+        // 2. Alarm Logic
+        function setAlarm() {
+            const sec = parseInt(document.getElementById('alarmSec').value);
+            app.send('alarm', { sec: sec, msg: "🚨 ALERT: TIME'S UP!" });
+            app.log(`Alarm scheduled in ${sec} seconds`);
+        }
+
+        // 3. Storage Logic
+        function saveNative() {
+            const val = document.getElementById('storeData').value;
+            app.send('storage_save', { key: 'titan_key', val: val });
+            app.log("Saved to Native Storage");
+        }
+
+        function loadNative() {
+            app.send('storage_load', { key: 'titan_key' });
+        }
+
+        function vibrate() {
+            app.send('vibrate');
+            app.log("Vibration Triggered");
+        }
+
+        // --- CALLBACKS FROM NATIVE ---
+        //বাটন ক্লিক হ্যান্ডেলিং
+        window.onNotificationClick = function(buttonId) {
+            app.log(`NOTIF CLICK: ${buttonId}`);
+            if (buttonId === 'btn_stop') stopSvc();
+            if (buttonId === 'btn_play') app.log("Play Logic Triggered!");
+        };
+
+        //স্টোরেজ ডাটা হ্যান্ডেলিং
+        window.fromNative = function(type, data) {
             if (type === 'storage_result') {
-                document.getElementById('storageInput').value = data.val || "";
-                app.vibrate();
+                document.getElementById('storeData').value = data.val;
+                app.log("Loaded: " + data.val);
             }
         };
-
-        // Initialize
-        app.initChart();
-        // Check connection
-        setTimeout(() => app.send('check'), 500);
-
     </script>
 </body>
 </html>
