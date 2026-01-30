@@ -24,10 +24,10 @@ jobs:
 
       - name: Initialize Flutter Project
         run: |
-          # 1. প্রজেক্ট তৈরি
+          # ১. প্রজেক্ট তৈরি
           flutter create --org com.titanchart --project-name titanchart_pro .
           
-          # 2. প্লাগিন অ্যাড
+          # ২. প্লাগিন অ্যাড
           flutter pub add webview_flutter:^4.7.0
           flutter pub add flutter_foreground_task:^6.5.0
           flutter pub add flutter_local_notifications:^17.0.0
@@ -117,10 +117,17 @@ jobs:
           void startCallback() { FlutterForegroundTask.setTaskHandler(MyTaskHandler()); }
 
           class MyTaskHandler extends TaskHandler {
-            @override Future<void> onStart(DateTime t, SendPort? s) async {}
-            @override Future<void> onEvent(DateTime t, SendPort? s) async {}
-            @override Future<void> onDestroy(DateTime t, SendPort? s) async {}
-            @override void onNotificationPressed() { FlutterForegroundTask.launchApp(); }
+            @override
+            Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {}
+
+            @override
+            void onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {}
+
+            @override
+            Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {}
+            
+            @override
+            void onNotificationPressed() { FlutterForegroundTask.launchApp(); }
           }
 
           class TitanApp extends StatefulWidget {
@@ -226,7 +233,7 @@ jobs:
           storeFile=release-key.jks
           EOF
           
-          # গ্রেডল কনফিগারেশন (shrinkResources এবং minifyEnabled ফিক্স করা হয়েছে)
+          # গ্রেডল কনফিগারেশন
           cat > android/app/build.gradle <<EOF
           plugins { id "com.android.application"; id "kotlin-android"; id "dev.flutter.flutter-gradle-plugin"; }
           def kP = new Properties()
