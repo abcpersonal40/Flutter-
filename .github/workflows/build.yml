@@ -1,4 +1,4 @@
-name: TitanChart Pro (User Design)
+name: TitanChart Pro (Final Fix)
 
 on:
   push:
@@ -9,7 +9,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 1. আপনার রিপোজিটরি (সহ www ফোল্ডার) ডাউনলোড করবে
       - uses: actions/checkout@v4
 
       - name: Setup Java
@@ -25,10 +24,10 @@ jobs:
 
       - name: Initialize Flutter Project
         run: |
-          # বর্তমান ফোল্ডারে ফ্লাটার প্রজেক্ট তৈরি হবে (আপনার www ফোল্ডার ডিলিট হবে না)
+          # Create project in current dir (merges with your www folder)
           flutter create --org com.titanchart --project-name titanchart_pro .
           
-          # প্লাগিন ইন্সটল
+          # Install Plugins
           flutter pub add webview_flutter:^4.7.0
           flutter pub add flutter_foreground_task:^6.5.0
           flutter pub add flutter_local_notifications:^17.0.0
@@ -36,18 +35,12 @@ jobs:
           flutter pub add permission_handler:^11.3.0
           flutter pub add vibration:^1.9.0
 
-      # 2. আপনার www ফোল্ডারকে অ্যাপের সাথে লিংক করা হচ্ছে
+      # --- FIX: INSERT ASSETS CORRECTLY ---
       - name: Link Your WWW Design
         run: |
-          # আমরা এখানে কোনো নতুন index.html বানাচ্ছি না।
-          # শুধুমাত্র আপনার রিপোজিটরিতে থাকা www ফোল্ডারকে চিনিয়ে দিচ্ছি।
-          
-          cat >> pubspec.yaml <<EOF
-          
-          flutter:
-            assets:
-              - www/
-          EOF
+          # Instead of appending a duplicate 'flutter:' key, 
+          # we inject the assets config into the existing block.
+          sed -i 's/uses-material-design: true/uses-material-design: true\n  assets:\n    - www\//' pubspec.yaml
 
       - name: Configure Android Manifest
         run: |
@@ -137,10 +130,9 @@ jobs:
               _reqPerms();
               _initService();
               
-              // Load the user's index.html from www folder
               _ctrl = WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                ..setBackgroundColor(const Color(0xFF0B0E14))
+                ..setBackgroundColor(const Color(0xFF0F172A)) // Match your glassmorphism BG
                 ..addJavaScriptChannel('TitanBridge', onMessageReceived: (m) => _handleMsg(m.message))
                 ..loadFlutterAsset('www/index.html');
             }
@@ -184,7 +176,7 @@ jobs:
                   FlutterForegroundTask.updateService(notificationTitle: 'TitanChart Pro', notificationText: data['body']);
                 }
                 else if (type == 'alarm') {
-                  int sec = data['sec']; // Changed variable name to match your HTML
+                  int sec = data['sec']; 
                   await flutterLocalNotificationsPlugin.show(
                     DateTime.now().millisecond, 'Titan Alarm', data['msg'],
                     const NotificationDetails(android: AndroidNotificationDetails(
@@ -269,5 +261,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TitanChart-Pro-MyDesign-APK
+          name: TitanChart-Pro-Fixed-APK
           path: build/app/outputs/flutter-apk/app-release.apk
