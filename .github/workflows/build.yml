@@ -37,7 +37,7 @@ jobs:
         run: |
           sed -i 's/uses-material-design: true/uses-material-design: true\n  assets:\n    - www\//' pubspec.yaml
 
-      - name: Android Config (Alarm & Permissions)
+      - name: Android Config (Manifest Fix)
         run: |
           cat > android/app/src/main/AndroidManifest.xml <<EOF
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.titanchart.titanchart_pro">
@@ -75,7 +75,7 @@ jobs:
           </manifest>
           EOF
 
-      - name: Inject Advanced Bridge Engine
+      - name: Inject Correct Bridge Engine
         run: |
           cat > lib/main.dart <<EOF
           import 'dart:async';
@@ -120,6 +120,7 @@ jobs:
             @override void onRepeatEvent(DateTime t, SendPort? s) {}
             @override Future<void> onDestroy(DateTime t, SendPort? s) async {}
             @override void onButtonPressed(String id) {
+              // communication in v6.x
               FlutterForegroundTask.sendDataToMain(id);
             }
           }
@@ -131,13 +132,11 @@ jobs:
 
           class _TitanAppState extends State<TitanApp> {
             late final WebViewController _ctrl;
+            ReceivePort? _receivePort;
 
             @override
             void initState() {
               super.initState();
-              FlutterForegroundTask.addTaskDataCallback((data) {
-                if (data is String) _ctrl.runJavaScript("if(window.onNotificationClick) window.onNotificationClick('\$data')");
-              });
               _setupWebView();
             }
 
@@ -147,7 +146,11 @@ jobs:
                 ..setBackgroundColor(const Color(0xFF0F172A))
                 ..addJavaScriptChannel('TitanBridge', onMessageReceived: (m) => _handle(m.message))
                 ..loadFlutterAsset('www/index.html');
-              [Permission.notification, Permission.scheduleExactAlarm, Permission.vibrate].request();
+              _reqPerms();
+            }
+
+            Future<void> _reqPerms() async {
+              await [Permission.notification, Permission.scheduleExactAlarm].request();
             }
 
             Future<void> _handle(String json) async {
@@ -182,7 +185,19 @@ jobs:
                   iosNotificationOptions: const IOSNotificationOptions(),
                   foregroundTaskOptions: const ForegroundTaskOptions(interval: 1000, autoRunOnBoot: true, allowWakeLock: true),
                 );
-                FlutterForegroundTask.startService(notificationTitle: d['title'], notificationText: d['body'], callback: startCallback);
+                
+                final res = await FlutterForegroundTask.startService(
+                  notificationTitle: d['title'], 
+                  notificationText: d['body'], 
+                  callback: startCallback
+                );
+                
+                if (res) {
+                   _receivePort = FlutterForegroundTask.receivePort;
+                   _receivePort?.listen((data) {
+                      if (data is String) _ctrl.runJavaScript("if(window.onNotificationClick) window.onNotificationClick('\$data')");
+                   });
+                }
               } else if (type == 'foreground_stop') {
                 FlutterForegroundTask.stopService();
               } else if (type == 'foreground_update') {
@@ -196,7 +211,14 @@ jobs:
               }
             }
 
-            @override Widget build(BuildContext context) => MaterialApp(debugShowCheckedModeBanner: false, home: Scaffold(body: SafeArea(child: WebViewWidget(controller: _ctrl))));
+            @override Widget build(BuildContext context) {
+              return MaterialApp(
+                debugShowCheckedModeBanner: false, 
+                home: WithForegroundTask(
+                  child: Scaffold(body: SafeArea(child: WebViewWidget(controller: _ctrl)))
+                )
+              );
+            }
           }
           EOF
 
