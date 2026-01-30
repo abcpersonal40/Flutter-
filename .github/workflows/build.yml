@@ -113,15 +113,30 @@ jobs:
           }
 
           @pragma('vm:entry-point')
-          void startCallback() { FlutterForegroundTask.setTaskHandler(MyTaskHandler()); }
+          void startCallback() {
+            FlutterForegroundTask.setTaskHandler(MyTaskHandler());
+          }
 
           class MyTaskHandler extends TaskHandler {
-            @override Future<void> onStart(DateTime t, SendPort? s) async {}
-            @override void onRepeatEvent(DateTime t, SendPort? s) {}
-            @override Future<void> onDestroy(DateTime t, SendPort? s) async {}
-            @override void onButtonPressed(String id) {
-              // communication in v6.x
-              FlutterForegroundTask.sendDataToMain(id);
+            SendPort? _sendPort;
+
+            @override
+            Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
+              _sendPort = sendPort;
+            }
+
+            @override
+            void onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
+              _sendPort = sendPort;
+            }
+
+            @override
+            Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {}
+
+            @override
+            void onButtonPressed(String id) {
+              // ডাটা পাঠানোর সঠিক পদ্ধতি v6.x
+              _sendPort?.send(id);
             }
           }
 
@@ -176,6 +191,7 @@ jobs:
                 if (d['buttons'] != null) {
                    for (var b in d['buttons']) btns.add(NotificationButton(id: b['id'], text: b['text']));
                 }
+                
                 FlutterForegroundTask.init(
                   androidNotificationOptions: AndroidNotificationOptions(
                     channelId: 'titan_service', channelName: 'Titan Service',
@@ -186,17 +202,19 @@ jobs:
                   foregroundTaskOptions: const ForegroundTaskOptions(interval: 1000, autoRunOnBoot: true, allowWakeLock: true),
                 );
                 
-                final res = await FlutterForegroundTask.startService(
+                final bool hasStarted = await FlutterForegroundTask.startService(
                   notificationTitle: d['title'], 
                   notificationText: d['body'], 
                   callback: startCallback
                 );
-                
-                if (res) {
-                   _receivePort = FlutterForegroundTask.receivePort;
-                   _receivePort?.listen((data) {
-                      if (data is String) _ctrl.runJavaScript("if(window.onNotificationClick) window.onNotificationClick('\$data')");
-                   });
+
+                if (hasStarted) {
+                  _receivePort = FlutterForegroundTask.receivePort;
+                  _receivePort?.listen((data) {
+                    if (data is String) {
+                      _ctrl.runJavaScript("if(window.onNotificationClick) window.onNotificationClick('\$data')");
+                    }
+                  });
                 }
               } else if (type == 'foreground_stop') {
                 FlutterForegroundTask.stopService();
@@ -207,7 +225,8 @@ jobs:
                 await p.setString(d['key'], d['val']);
               } else if (type == 'storage_load') {
                 final p = await SharedPreferences.getInstance();
-                _ctrl.runJavaScript("window.fromNative('storage_result', { val: '\${p.getString(d['key']) ?? ''}' });");
+                String val = p.getString(d['key']) ?? '';
+                _ctrl.runJavaScript("window.fromNative('storage_result', { val: '\$val' });");
               }
             }
 
