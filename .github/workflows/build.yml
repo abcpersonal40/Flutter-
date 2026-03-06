@@ -10,31 +10,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
 
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
-          distribution: zulu
-          java-version: "17"
-
+          distribution: 'zulu'
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.19.0"
-          cache: true
+          flutter-version: '3.19.0'
 
-
-      - name: Create Flutter Project
+      - name: Initialize Project
         run: |
           flutter create --org com.titanchart --project-name titanchart_pro .
 
-
-      - name: Install Dependencies
-        run: |
           flutter pub add webview_flutter:^4.7.0
           flutter pub add flutter_foreground_task:^6.5.0
           flutter pub add flutter_local_notifications:^17.0.0
@@ -43,27 +35,29 @@ jobs:
           flutter pub add vibration:^1.9.0
           flutter pub add timezone:^0.9.4
 
-
-      - name: Inject Assets
+      - name: Ensure WWW Assets
         run: |
-          sed -i '/uses-material-design/a\  assets:\n    - www/' pubspec.yaml
-          flutter pub get
+          echo "Checking www folder"
+          if [ ! -d "www" ]; then
+            echo "ERROR: www folder missing"
+            exit 1
+          fi
 
+          echo "WWW FILE STRUCTURE:"
+          find www
 
-      - name: Verify Asset Files
+      - name: Link Assets Correctly
         run: |
-          echo "Listing www folder"
-          ls -R www
+          sed -i 's/uses-material-design: true/uses-material-design: true\n  assets:\n    - www\//' pubspec.yaml
 
-
-      - name: Android Manifest Setup
+      - name: Android Config (Manifest Fix)
         run: |
           cat > android/app/src/main/AndroidManifest.xml <<EOF
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              package="com.titanchart.titanchart_pro">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.titanchart.titanchart_pro">
 
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
               <uses-permission android:name="android.permission.WAKE_LOCK"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <uses-permission android:name="android.permission.VIBRATE"/>
@@ -76,9 +70,7 @@ jobs:
                   android:name="\${applicationName}"
                   android:icon="@mipmap/ic_launcher">
 
-                  <meta-data
-                      android:name="flutterEmbedding"
-                      android:value="2" />
+                  <meta-data android:name="flutterEmbedding" android:value="2" />
 
                   <activity
                       android:name=".MainActivity"
@@ -102,13 +94,16 @@ jobs:
                       android:exported="false"/>
 
               </application>
+
           </manifest>
           EOF
 
-
-      - name: Inject Flutter Main
+      - name: Inject Bridge Engine
         run: |
           cat > lib/main.dart <<'EOF'
+          import 'dart:async';
+          import 'dart:convert';
+          import 'dart:isolate';
           import 'package:flutter/material.dart';
           import 'package:webview_flutter/webview_flutter.dart';
 
@@ -116,26 +111,14 @@ jobs:
             runApp(const TitanApp());
           }
 
-          class TitanApp extends StatelessWidget {
+          class TitanApp extends StatefulWidget {
             const TitanApp({super.key});
 
             @override
-            Widget build(BuildContext context) {
-              return const MaterialApp(
-                debugShowCheckedModeBanner: false,
-                home: TitanHome(),
-              );
-            }
+            State<TitanApp> createState() => _TitanAppState();
           }
 
-          class TitanHome extends StatefulWidget {
-            const TitanHome({super.key});
-
-            @override
-            State<TitanHome> createState() => _TitanHomeState();
-          }
-
-          class _TitanHomeState extends State<TitanHome> {
+          class _TitanAppState extends State<TitanApp> {
 
             late final WebViewController controller;
 
@@ -145,46 +128,48 @@ jobs:
 
               controller = WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..setBackgroundColor(const Color(0xFF000000))
+                ..addJavaScriptChannel(
+                  'TitanBridge',
+                  onMessageReceived: (message) {
+                    print("JS MESSAGE: ${message.message}");
+                  },
+                )
                 ..loadFlutterAsset('www/index.html');
             }
 
             @override
             Widget build(BuildContext context) {
-              return Scaffold(
-                body: SafeArea(
-                  child: WebViewWidget(controller: controller),
+              return MaterialApp(
+                debugShowCheckedModeBanner: false,
+                home: Scaffold(
+                  body: SafeArea(
+                    child: WebViewWidget(controller: controller),
+                  ),
                 ),
               );
             }
           }
           EOF
 
-
-      - name: Generate Signing Key
+      - name: Build APK
         run: |
           keytool -genkey -v \
-            -keystore android/app/release-key.jks \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -alias key \
-            -storepass titan123456 \
-            -keypass titan123456 \
-            -dname "CN=Titan, O=Dev, C=BD"
+          -keystore android/app/release-key.jks \
+          -keyalg RSA \
+          -keysize 2048 \
+          -validity 10000 \
+          -alias key \
+          -storepass titan123456 \
+          -keypass titan123456 \
+          -dname "CN=Titan, O=Dev, C=BD"
 
-
-      - name: Configure Signing
-        run: |
           echo "storePassword=titan123456" > android/key.properties
           echo "keyPassword=titan123456" >> android/key.properties
           echo "keyAlias=key" >> android/key.properties
           echo "storeFile=release-key.jks" >> android/key.properties
 
-
-      - name: Build Release APK
-        run: |
           flutter build apk --release
-
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
